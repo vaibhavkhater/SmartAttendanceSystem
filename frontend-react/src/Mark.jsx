@@ -11,6 +11,7 @@ export default function Mark() {
     setBusy(true);
     try {
       const base64Image = snapBase64();
+      console.log(base64Image)
       const data = await markAttendance(base64Image);
       setRes(data);
     } catch (e) {

@@ -1,18 +1,26 @@
-console.log('BASE=', import.meta.env.VITE_API_BASE, 'KEY?', !!import.meta.env.VITE_API_KEY);
+// console.log('BASE=', import.meta.env.VITE_API_BASE, 'KEY?', !!import.meta.env.VITE_API_KEY);
 
 import axios from "axios";
-const BASE = import.meta.env.VITE_API_BASE;
-const KEY  = import.meta.env.VITE_API_KEY;
-const withKey = (url) => `${url}${url.includes("?") ? "&" : "?"}code=${KEY}`;
+
+// Toggle between local and Azure
+const USE_LOCAL = true; // Set to false to use Azure
+
+const BASE = USE_LOCAL 
+  ? "http://localhost:7071/api"
+  : import.meta.env.VITE_API_BASE;
+  
+const KEY = import.meta.env.VITE_API_KEY;
+const withKey = (url) => USE_LOCAL ? url : `${url}${url.includes("?") ? "&" : "?"}code=${KEY}`;
+console.log('Using BASE=', BASE);
 
 export const markAttendance = (base64Image) =>
-  axios.post(withKey(`${BASE}/markAttendance`), { base64Image }).then(r=>r.data);
+  axios.post(withKey(`${BASE}/markattendance`), { base64Image }).then(r=>r.data);
 
 export const uploadAndEnroll = (payload) =>
-  axios.post(withKey(`${BASE}/uploadAndEnroll`), payload).then(r=>r.data);
+  axios.post(withKey(`${BASE}/uploadandenroll`), payload).then(r=>r.data);
 
 export const getAttendance = (dateStr) =>
-  axios.get(withKey(`${BASE}/getAttendance?date=${dateStr}`)).then(r=>r.data);
+  axios.get(withKey(`${BASE}/getattendance?date=${dateStr}`)).then(r=>r.data);
 
 export const listUsers = () =>
-  axios.get(withKey(`${BASE}/listUsers`)).then(r=>r.data);
+  axios.get(withKey(`${BASE}/listusers`)).then(r=>r.data);
