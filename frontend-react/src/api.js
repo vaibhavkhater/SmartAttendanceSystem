@@ -3,7 +3,7 @@
 import axios from "axios";
 
 // Toggle between local and Azure
-const USE_LOCAL = false; // Set to false to use Azure
+const USE_LOCAL = true; // Set to false to use Azure
 
 const BASE = USE_LOCAL 
   ? "http://localhost:7071/api"
