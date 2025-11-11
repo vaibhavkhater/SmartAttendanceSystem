@@ -5,12 +5,13 @@ import json
 import os
 import base64
 import uuid
-import datetime
+# import datetime
 import requests
 from azure.storage.blob import BlobServiceClient
 from azure.cosmos import CosmosClient
 from dotenv import load_dotenv
 from urllib.parse import urlparse
+from datetime import datetime, timedelta, timezone
 
 # Load environment variables from local.settings.json
 with open('local.settings.json', 'r') as f:
@@ -33,9 +34,10 @@ _blob = BlobServiceClient.from_connection_string(os.environ["BLOB_CONN_STRING"])
 _container = _blob.get_container_client(os.environ["BLOB_CONTAINER"])
 
 def save_base64_jpeg(prefix: str, b64: str) -> str:
-    """Save base64 encoded image to Azure Blob Storage"""
+    if isinstance(b64, str) and b64.startswith("data:"):
+        b64 = b64.split(",", 1)[1]
     data = base64.b64decode(b64)
-    name = f"{prefix}/{datetime.datetime.utcnow().date()}/{uuid.uuid4()}.jpg"
+    name = f"{prefix}/{datetime.utcnow().date()}/{uuid.uuid4()}.jpg"
     _container.upload_blob(name, data, overwrite=True, content_type="image/jpeg")
     return name
 
@@ -295,7 +297,7 @@ def uploadAndEnroll():
             "name": name,
             "roll": roll,
             "classLabel": tag,
-            "createdAt": datetime.datetime.utcnow().isoformat() + "Z",
+            "createdAt": datetime.utcnow().isoformat() + "Z",
             "lastEnrollBlob": blob_path
         }
         upsert_user(user_doc)
@@ -348,7 +350,7 @@ def mark_attendance():
                 "id": f"att-{uuid.uuid4()}",
                 "userId": user["userId"],
                 "name": user["name"],
-                "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.utcnow().isoformat() + "Z",
                 "confidence": round(top['probability'], 4),
                 "imageBlobPath": blob_path,
                 "device": "web",
@@ -367,57 +369,157 @@ def mark_attendance():
         return jsonify({"error": str(e)}), 500
 
 
+# put near your other imports
+
+
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def _parse_date_flexible(date_str: str):
+    """Accept 'YYYY-MM-DD' or 'DD-MM-YYYY'."""
+    date_str = date_str.strip()
+    try:
+        y, m, d = map(int, date_str.split("-"))
+        if y >= 1000:
+            return y, m, d
+    except Exception:
+        pass
+    try:
+        d, m, y = map(int, date_str.split("-"))
+        if y >= 1000:
+            return y, m, d
+    except Exception:
+        pass
+    raise ValueError("Unrecognized date format")
+
 @app.route('/api/getAttendance', methods=['GET', 'OPTIONS'])
-@app.route('/api/getattendance', methods=['GET', 'OPTIONS'])  # lowercase version
+@app.route('/api/getattendance', methods=['GET', 'OPTIONS'])
 def getAttendance():
-    """Endpoint to get attendance records for a specific date"""
-    # Handle CORS preflight
+    """Return attendance records for a single calendar day in IST."""
     if request.method == 'OPTIONS':
         return jsonify({}), 200
-    
-    logging.info('getAttendance function triggered')
-
     try:
-        date = request.args.get('date')
-        if not date:
-            return jsonify({"error": "date parameter required"}), 400
-        
-        # Query attendance for the given date
-        query = "SELECT * FROM c WHERE STARTSWITH(c.timestamp, @date) ORDER BY c.timestamp DESC"
+        date_str = request.args.get('date')
+        if date_str:
+            try:
+                y, m, d = _parse_date_flexible(date_str)
+                day_local = datetime(y, m, d, tzinfo=IST)
+                date_str = f"{y:04d}-{m:02d}-{d:02d}"
+            except ValueError:
+                logging.error(f"getAttendance: bad date '{date_str}'")
+                return jsonify({"error": "Invalid date; use YYYY-MM-DD or DD-MM-YYYY"}), 400
+        else:
+            now_local = datetime.now(IST)
+            day_local = datetime(now_local.year, now_local.month, now_local.day, tzinfo=IST)
+            date_str = f"{day_local.year:04d}-{day_local.month:02d}-{day_local.day:02d}"
+
+        # Compute the day window in UTC
+        start_local = day_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_local = start_local + timedelta(days=1)
+        start_utc = start_local.astimezone(timezone.utc)
+        end_utc = end_local.astimezone(timezone.utc)
+
+        # Query by _ts (Cosmos system timestamp)
+        start_epoch = int(start_utc.timestamp())
+        end_epoch = int(end_utc.timestamp())
+
+        logging.info(f"getAttendance {date_str} IST -> UTC [{start_utc} .. {end_utc}) -> _ts range [{start_epoch}..{end_epoch})")
+
+        q_ts = """
+            SELECT c.id, c.userId, c.name, c.timestamp, c.confidence, c.status, c.imageBlobPath, c._ts
+            FROM c
+            WHERE c._ts >= @from AND c._ts < @to
+            ORDER BY c._ts DESC
+        """
         items = list(_att.query_items(
-            query=query,
-            parameters=[{"name": "@date", "value": date}],
+            query=q_ts,
+            parameters=[{"name": "@from", "value": start_epoch},
+                        {"name": "@to", "value": end_epoch}],
             enable_cross_partition_query=True
         ))
-        
-        return jsonify(items), 200
+
+        # Fallback to ISO string if nothing found
+        if not items:
+            start_iso = start_utc.isoformat().replace('+00:00', 'Z')
+            end_iso = end_utc.isoformat().replace('+00:00', 'Z')
+            q_iso = """
+                SELECT * FROM c
+                WHERE c.timestamp >= @from AND c.timestamp < @to
+                ORDER BY c.timestamp DESC
+            """
+            items = list(_att.query_items(
+                query=q_iso,
+                parameters=[{"name": "@from", "value": start_iso},
+                            {"name": "@to", "value": end_iso}],
+                enable_cross_partition_query=True
+            ))
+
+        return jsonify({
+            "ok": True,
+            "range": {
+                "tz": "Asia/Kolkata",
+                "localDate": date_str,
+                "utcFrom": start_utc.isoformat().replace('+00:00', 'Z'),
+                "utcTo": end_utc.isoformat().replace('+00:00', 'Z')
+            },
+            "count": len(items),
+            "items": items
+        }), 200
+
     except Exception as e:
-        logging.error(f"Error in getAttendance: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        logging.exception("Error in getAttendance")
+        return jsonify({"error": "Internal error in getAttendance"}), 500
 
 
 @app.route('/api/listUsers', methods=['GET', 'OPTIONS'])
-@app.route('/api/listusers', methods=['GET', 'OPTIONS'])  # lowercase version
+@app.route('/api/listusers', methods=['GET', 'OPTIONS'])  # lowercase alias
 def listUsers():
-    """Endpoint to list all enrolled users"""
-    # Handle CORS preflight
+    """List all enrolled users"""
     if request.method == 'OPTIONS':
         return jsonify({}), 200
-    
-    logging.info('listUsers function triggered')
-
     try:
-        # Query all users
+        # Simple: fetch all
         query = "SELECT * FROM c"
         items = list(_users.query_items(
             query=query,
             enable_cross_partition_query=True
         ))
-        
         return jsonify(items), 200
     except Exception as e:
         logging.error(f"Error in listUsers: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/usersSummary', methods=['GET', 'OPTIONS'])
+def usersSummary():
+    """Return total user count (fast)"""
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+    try:
+        # Cosmos aggregate
+        q = "SELECT VALUE COUNT(1) FROM c"
+        total = list(_users.query_items(q, enable_cross_partition_query=True))[0]
+        return jsonify({"totalUsers": total}), 200
+    except Exception as e:
+        logging.error(f"usersSummary error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/attendanceRecent', methods=['GET', 'OPTIONS'])
+def attendance_recent():
+    """Return the latest 50 attendance items to debug the dashboard."""
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+    try:
+        # Order by _ts (system timestamp) descending; LIMIT 50
+        q = """
+        SELECT TOP 50 c.id, c.userId, c.name, c.timestamp, c.confidence, c.status, c.imageBlobPath, c._ts
+        FROM c
+        ORDER BY c._ts DESC
+        """
+        items = list(_att.query_items(q, enable_cross_partition_query=True))
+        return jsonify({"ok": True, "count": len(items), "items": items}), 200
+    except Exception as e:
+        logging.exception("attendance_recent failed")
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 if __name__ == '__main__':
