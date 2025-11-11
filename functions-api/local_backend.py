@@ -90,16 +90,6 @@ def predict_image(b64: str):
         # If the endpoint is wrong, you might need to check your Azure Portal
         # Go to customvision.ai -> Settings -> Get Prediction URL
         raise Exception(f"Custom Vision API Error: {e.response.status_code} - {e.response.text}")
-    
-# Add after predict_image function
-
-
-
-from urllib.parse import urlparse
-import base64
-import os
-import logging
-import requests
 
 def _normalize_training_endpoint(ep: str) -> str:
     """
