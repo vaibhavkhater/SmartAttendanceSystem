@@ -37,8 +37,7 @@ export default function Enroll() {
       <div style={{ 
         display: 'grid',
         gap: '2rem',
-        gridTemplateColumns: '1fr',
-        '@media (min-width: 768px)': { gridTemplateColumns: '1fr 1fr' }
+        gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))'
       }}>
         <div>
           <div style={{ marginBottom: '1.5rem' }}>

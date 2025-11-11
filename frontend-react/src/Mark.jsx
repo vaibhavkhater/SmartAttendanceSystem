@@ -31,8 +31,7 @@ export default function Mark() {
       <div style={{ 
         display: 'grid', 
         gap: '2rem',
-        gridTemplateColumns: 'minmax(0, 1fr)',
-        '@media (min-width: 768px)': { gridTemplateColumns: '1fr 1fr' }
+        gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))'
       }}>
         <div>
           <div style={{ 

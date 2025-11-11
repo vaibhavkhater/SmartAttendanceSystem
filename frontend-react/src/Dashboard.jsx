@@ -280,7 +280,7 @@ export default function Dashboard() {
                     <div style={{ fontWeight: 600, color: '#0f172a' }}>
                       {r.name || 'Unknown'}
                     </div>
-                    {r.userId && (
+                    {!r.userId && (
                       <div style={{ fontSize: '0.813rem', color: '#64748b' }}>
                         ID: {r.userId}
                       </div>

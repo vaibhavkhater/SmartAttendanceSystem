@@ -373,7 +373,7 @@ def mark_attendance(req: func.HttpRequest) -> func.HttpResponse:
                 "id": f"att-{uuid.uuid4()}",
                 "userId": user["userId"],
                 "name": user["name"],
-                "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.utcnow().isoformat() + "Z",
                 "confidence": round(top["probability"], 4),
                 "imageBlobPath": blob_path,
                 "device": "web",

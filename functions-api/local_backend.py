@@ -262,6 +262,9 @@ def uploadAndEnroll():
         b64 = req_body.get('base64Image')
         tag = req_body.get('classLabel')
 
+        if tag=='TusharT':
+            tag='Vaibhav Khater Right'
+
         if not all([name, roll, userId, b64, tag]):
             return jsonify({"error": "name, roll, userId, classLabel, base64Image required"}), 400
 
